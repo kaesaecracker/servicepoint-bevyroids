@@ -5,6 +5,7 @@ use std::{f32::consts::PI, ops::Range, time::Duration};
 use bevy::{
     ecs::{event::Event, schedule::ScheduleLabel},
     prelude::*,
+    render::camera,
     time::common_conditions::on_timer,
     utils::HashSet,
     window::PrimaryWindow,
@@ -24,6 +25,13 @@ use flickering::{Flick, FlickPlugin};
 use physics::{AngularVelocity, Damping, PhysicsPlugin, PhysicsSystemLabel, SpeedLimit, Velocity};
 use rand::{prelude::SliceRandom, Rng};
 use random::{Random, RandomPlugin};
+use servicepoint2::{
+    bevy_plugin::{
+        make_export_bundle, ServicePointExportSettings, ServicePointExportSource,
+        ServicePointPlugin,
+    },
+    Origin, PIXEL_HEIGHT, PIXEL_WIDTH,
+};
 
 mod boundary;
 mod collision;
@@ -32,12 +40,19 @@ mod flickering;
 mod physics;
 mod random;
 
+const WORLD_WIDTH: f32 = 800.0;
+const WORLD_HEIGHT: f32 = 600.0;
+
 fn main() {
+    let servicepoint_plugin = ServicePointPlugin {
+        bind: "127.0.0.1:2342".into(),
+    };
+
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Bevyroids".to_string(),
-                resolution: (800.0, 600.0).into(),
+                resolution: (WORLD_WIDTH, WORLD_HEIGHT).into(),
                 ..Default::default()
             }),
             ..Default::default()
@@ -90,6 +105,7 @@ fn main() {
         .add_systems(Update, asteroid_hit_system.after(CollisionSystemLabel))
         .add_systems(Update, ship_hit_system.after(CollisionSystemLabel))
         .add_systems(Update, ufo_hit_system.after(CollisionSystemLabel))
+        .add_plugins(servicepoint_plugin)
         .run();
 }
 
@@ -257,9 +273,31 @@ impl Default for ExplosionBundle {
     }
 }
 
-fn setup_system(mut commands: Commands) {
-    commands.spawn(Camera2dBundle::default());
+fn setup_system(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    mut export_sources: ResMut<Assets<ServicePointExportSource>>,
+) {
+    let mut camera = commands.spawn(Camera2dBundle::default());
+
+    let export_bundle = make_export_bundle(
+        ServicePointExportSettings {
+            origin: Origin(0, 0),
+            window_width: PIXEL_WIDTH,
+            window_height: PIXEL_HEIGHT,
+        },
+        camera::ScalingMode::AutoMin {
+            min_width: WORLD_WIDTH,
+            min_height: WORLD_HEIGHT,
+        },
+        &mut camera,
+        &mut images,
+        &mut export_sources,
+    );
+
     commands.spawn(Ship::spawn(Duration::from_secs(0)));
+
+    commands.spawn(export_bundle);
 }
 
 fn thrust_system(mut query: Query<(&mut Velocity, &ThrustEngine, &Transform)>) {
@@ -619,7 +657,10 @@ fn steering_control_system(
     }
 }
 
-fn thrust_control_system(keyboard_input: Res<ButtonInput<KeyCode>>, mut query: Query<&mut ThrustEngine>) {
+fn thrust_control_system(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut query: Query<&mut ThrustEngine>,
+) {
     for mut thrust_engine in query.iter_mut() {
         thrust_engine.on = keyboard_input.pressed(KeyCode::ArrowUp)
     }
